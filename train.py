@@ -136,7 +136,6 @@ if __name__ == '__main__':
     pred_len = args.pred_len     
     seq_len=args.pred_len
     label_len=args.pred_len
-    criterion = nn.MSELoss()
     print("Company : ", args.company)
 
 
@@ -145,8 +144,9 @@ if __name__ == '__main__':
     min_max_scaler = MinMaxScaler()
     data["value"] = min_max_scaler.fit_transform(data["value"].to_numpy().reshape(-1, 1)).reshape(-1)
     data.head()
-    data_train = data.iloc[:-24*365].copy()
-    data_valid = data.iloc[-24*365:].copy()
+    data_train = data.copy()
+    # data_train = data.iloc[:-24*365].copy()
+    # data_valid = data.iloc[-24*365:].copy()
 
     seq_len = pred_len#인풋 크기
     label_len = pred_len#디코더에서 참고할 크기
@@ -159,8 +159,8 @@ if __name__ == '__main__':
 
     train_dataset = Dataset_Pred(dataframe=data_train ,scale=True, size = (seq_len, label_len,pred_len))
     train_loader = DataLoader(train_dataset,batch_size=batch_size,shuffle=shuffle_flag,num_workers=num_workers,drop_last=drop_last)
-    valid_dataset = Dataset_Pred(dataframe=data_valid ,scale=True, size = (seq_len, label_len,pred_len))
-    valid_loader = DataLoader(valid_dataset,batch_size=batch_size,shuffle=False,num_workers=num_workers,drop_last=drop_last)
+    # valid_dataset = Dataset_Pred(dataframe=data_valid ,scale=True, size = (seq_len, label_len,pred_len))
+    # valid_loader = DataLoader(valid_dataset,batch_size=batch_size,shuffle=False,num_workers=num_workers,drop_last=drop_last)
 
     enc_in = 1
     dec_in = 1
@@ -169,9 +169,11 @@ if __name__ == '__main__':
     model = Informer(enc_in, dec_in, c_out, seq_len, label_len, pred_len, device = device).to(device)
 
     model_optim = optim.Adam(model.parameters(), lr=args.learning_rate)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optim, 'min', patience=3)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optim, 'min', patience=3)
+    scheduler = torch.optim.lr_scheduler.StepLR(model_optim, step_size=15, gamma=0.1)
+    
     from utils.tools import EarlyStopping
-    train_epochs = 100
+    train_epochs = 30
     early_stopping = EarlyStopping(patience=5, verbose=True)
     for epoch in range(train_epochs):
         total_loss, total_num = 0, 0
@@ -179,7 +181,7 @@ if __name__ == '__main__':
         for i, (batch_x,batch_y,batch_x_mark,batch_y_mark) in enumerate(tqdm(train_loader, leave=False)):
             model_optim.zero_grad()
             pred, true = _process_one_batch(batch_x, batch_y, batch_x_mark, batch_y_mark)
-            loss = criterion(pred, true)
+            loss = nmae(pred, true)
             total_loss += loss.item()
             total_num += pred.size(0)
             loss.backward()
@@ -188,25 +190,21 @@ if __name__ == '__main__':
         
         
         ##validation##
-        total_loss, total_num = 0, 0
-        model.eval()
-        with torch.no_grad():
-            for i, (batch_x,batch_y,batch_x_mark,batch_y_mark) in enumerate(valid_loader):
-                pred, true = _process_one_batch(batch_x, batch_y, batch_x_mark, batch_y_mark)
-                loss = criterion(pred, true)
-                total_loss += loss.item()
-                total_num += pred.size(0)
-            valid_loss = total_loss/total_num
-            scheduler.step(valid_loss)
-        early_stopping(valid_loss, model, f'model{args.company}.pth')
+        # total_loss, total_num = 0, 0
+        # model.eval()
+        # with torch.no_grad():
+        #     for i, (batch_x,batch_y,batch_x_mark,batch_y_mark) in enumerate(valid_loader):
+        #         pred, true = _process_one_batch(batch_x, batch_y, batch_x_mark, batch_y_mark)
+        #         loss = nmae(pred, true)
+        #         total_loss += loss.item()
+        #         total_num += pred.size(0)
+        #     valid_loss = total_loss/total_num
+        #     scheduler.step(valid_loss)
+        # early_stopping(valid_loss, model, f'model{args.company}.pth')
 
-        print(f"{epoch+1}/{train_epochs} Train : {train_loss:.4f}  Valid : {valid_loss:.4f}")
-        if early_stopping.early_stop:
-            print("Early stopping")
-            break
-    torch.save(model.state_dict(), f'./model{args.company}.pth')
-
-    with open(f'standard_scaler{args.company}.pickle', 'wb') as f:
-        pickle.dump(train_dataset.scaler, f, pickle.HIGHEST_PROTOCOL)
-    with open(f'minmax_scaler{args.company}.pickle', 'wb') as f:
-        pickle.dump(min_max_scaler, f, pickle.HIGHEST_PROTOCOL)
+        # print(f"{epoch+1}/{train_epochs} Train : {train_loss:.4f}  Valid : {valid_loss:.4f}")
+        # if early_stopping.early_stop:
+        #     print("Early stopping")
+        #     break
+        if epoch%10==9:
+            torch.save(model.state_dict(), f'./model{args.company}_{epoch}.pth')
